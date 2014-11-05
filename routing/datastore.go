@@ -12,7 +12,7 @@ type Datastore interface {
 	Cancel(rId string)
 }
 
-var mu = &sync.Mutex{}      // Datastore Mutex
+var mu = &sync.RWMutex{}    // Datastore Mutex, RW mutex to allow multiple readers
 var trackMu = &sync.Mutex{} // Tracking map Mutex
 var datastore = make(map[string]string)
 var tracking = make(map[string]chan struct{})
@@ -51,9 +51,9 @@ func repeat(r *Request) chan struct{} {
 // Yes, but later.. either with mutex or with just single channel ..
 
 func read(node string, measurement string, reply chan string) {
-	mu.Lock()
+	mu.RLock()
 	reply <- datastore[keyFormat(node, measurement)]
-	mu.Unlock()
+	mu.RUnlock()
 }
 
 func keyFormat(node string, measurement string) string {
