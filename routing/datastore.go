@@ -2,6 +2,7 @@ package routing
 
 import (
 	"errors"
+	"sync"
 	"time"
 )
 
@@ -11,8 +12,10 @@ type Datastore interface {
 	Cancel(rId string)
 }
 
-var datastore map[string]string
-var tracking map[string]chan struct{}
+var mu = &sync.Mutex{}      // Datastore Mutex
+var trackMu = &sync.Mutex{} // Tracking map Mutex
+var datastore = make(map[string]string)
+var tracking = make(map[string]chan struct{})
 
 type Data struct {
 	Node        string
@@ -48,7 +51,9 @@ func repeat(r *Request) chan struct{} {
 // Yes, but later.. either with mutex or with just single channel ..
 
 func read(node string, measurement string, reply chan string) {
+	mu.Lock()
 	reply <- datastore[keyFormat(node, measurement)]
+	mu.Unlock()
 }
 
 func keyFormat(node string, measurement string) string {
@@ -65,7 +70,9 @@ func Read(r *Request) error {
 		// Value was found, return Data
 		if r.Interval > 0 {
 			reply := repeat(r)
+			trackMu.Lock()
 			tracking[r.RequestId] = reply // Store the quit channel
+			trackMu.Unlock()
 		} else {
 			read(r.ToWrite.Node, r.ToWrite.Measurement, r.Reply)
 		}
@@ -78,21 +85,22 @@ func Read(r *Request) error {
 
 func Write(r *Request) error {
 	key := key(r)
+
+	mu.Lock()
 	datastore[key] = r.ToWrite.Value
+	mu.Unlock()
 	return nil
 }
 
 func Cancel(requestId string) error {
 	if _, found := tracking[requestId]; found {
 		// it was a valid key
+		trackMu.Lock()
 		close(tracking[requestId])
 		delete(tracking, requestId)
+		trackMu.Unlock()
 	} else {
 		errors.New("No subscription found for " + requestId)
 	}
 	return nil
-}
-
-func init() {
-	datastore = make(map[string]string)
 }
