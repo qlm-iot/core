@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/qlm-iot/core/routing"
-	"github.com/qlm-iot/qlm"
 	"net/http"
 )
 
@@ -23,15 +22,16 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 4096,
 }
 
-func (*ws wsConn) read() {
+func (ws *wsConn) receiving() {
 	for {
 		mtype, msg, err := ws.conn.ReadMessage()
 		if err != nil {
-			// Do something
+			fmt.Println(err.Error)
+			return
 		}
 		switch mtype {
 		case websocket.BinaryMessage:
-			ws.recv <- msg
+			routing.Process(msg, db)
 		case websocket.TextMessage:
 			/*
 				Handle Close messages here also, so we know when to remove someone from subscriptions (maybe?) and/or from the
@@ -43,20 +43,22 @@ func (*ws wsConn) read() {
 	}
 }
 
-func (*ws wsConn) send() {
-	for {
-		var msg []byte
-		select {
-		case msg = <-ws.send:
-			// Send back to the webSocket Channel?
+func (ws *wsConn) sending() {
+	/*
+		for {
+			var msg []byte
+			select {
+			case msg = <-ws.send:
+				// Send back to the webSocket Channel?
+			}
 		}
-	}
+	*/
 }
 
 func qlmWsConnect(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		fmt.Println("WebSocket connection failed")
+		fmt.Println(err.Error)
 		return
 	}
 
@@ -65,8 +67,8 @@ func qlmWsConnect(w http.ResponseWriter, r *http.Request) {
 
 	ws := &wsConn{recv: from, send: to, conn: conn}
 
-	go ws.send()
-	ws.read() // Block here
+	go ws.sending()
+	ws.receiving() // Block here
 
 	defer func() {
 		close(ws.recv)

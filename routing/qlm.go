@@ -1,21 +1,25 @@
 package routing
 
 import (
-	"github.com/qlm-iot/qlm"
+	"github.com/qlm-iot/qlm/mi"
 )
 
-func Process(mchan chan []byte, db Datastore) {
-	for {
-		var msg []byte
-		select {
-		case msg = <-mchan:
-			answer, _ := qlm.Unmarshal(msg)
-			for _, data := range answer.Objects {
-				for _, info := range data.InfoItems {
-					fmt.Println(info.Name)
-				}
+func Process(msg []byte, db Datastore) {
+	envelope, err := mi.Unmarshal(msg)
+	if err == nil {
+		if len(envelope.Cancel.RequestIds) > 0 {
+			for _, rId := range envelope.Cancel.RequestIds {
+				db.Cancel(rId.Text)
 			}
-			fmt.Println(answer.Version)
 		}
+
+		var read = &envelope.Read
+		if read != nil {
+		}
+
+		var write = &envelope.Write
+		if write != nil {
+		}
+
 	}
 }

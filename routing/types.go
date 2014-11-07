@@ -1,10 +1,9 @@
 package routing
 
 type Datastore interface {
-	NewStore()
-	Read(r *Request)
-	Write(r *Request)
-	Cancel(rId string)
+	Read(r *Request) error
+	Write(r *Request) error
+	Cancel(rId string) error
 }
 
 type Data struct {
