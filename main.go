@@ -4,54 +4,34 @@ import (
 	"flag"
 	"fmt"
 	"github.com/gorilla/websocket"
+	"github.com/qlm-iot/core/routing"
 	"github.com/qlm-iot/qlm"
 	"net/http"
 )
 
+type wsConn struct {
+	recv chan []byte
+	send chan []byte
+	conn *websocket.Conn
+}
+
 var destServer = flag.String("server", "", "Destination core server IP address")
-var messageChan = make(chan []byte)
+var db routing.Datastore
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
 }
 
-func processMessages(mchan chan []byte) {
-	var msg []byte
+func (*ws wsConn) read() {
 	for {
-		select {
-		case msg = <-mchan:
-			answer, _ := qlm.Unmarshal(msg)
-			for _, data := range answer.Objects {
-				for _, info := range data.InfoItems {
-					fmt.Println(info.Name)
-				}
-			}
-			fmt.Println(answer.Version)
-		}
-	}
-}
-
-// We should have channel here.. This is single agent connecting
-func qlmWsConnect(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		fmt.Println("WebSocket connection failed")
-		return
-	}
-	defer conn.Close()
-	// Create channel for input messages
-	//	mchan := make(chan []byte)
-	for {
-		mtype, msg, err := conn.ReadMessage()
+		mtype, msg, err := ws.conn.ReadMessage()
 		if err != nil {
 			// Do something
 		}
 		switch mtype {
 		case websocket.BinaryMessage:
-			// This should be sent to the channel and then parsed with unmarshaller?
-			// How to share channels between these two functions? Create one here and pass it on a function call? Only..?
-			messageChan <- msg
+			ws.recv <- msg
 		case websocket.TextMessage:
 			/*
 				Handle Close messages here also, so we know when to remove someone from subscriptions (maybe?) and/or from the
@@ -63,12 +43,45 @@ func qlmWsConnect(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (*ws wsConn) send() {
+	for {
+		var msg []byte
+		select {
+		case msg = <-ws.send:
+			// Send back to the webSocket Channel?
+		}
+	}
+}
+
+func qlmWsConnect(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		fmt.Println("WebSocket connection failed")
+		return
+	}
+
+	from := make(chan []byte) // This channel is used for data from this client
+	to := make(chan []byte)   // To send data to the client
+
+	ws := &wsConn{recv: from, send: to, conn: conn}
+
+	go ws.send()
+	ws.read() // Block here
+
+	defer func() {
+		close(ws.recv)
+		close(ws.send)
+		ws.conn.Close()
+	}()
+
+}
+
 func init() {
+	db = routing.NewInMemoryStore()
 }
 
 func main() {
 	flag.Parse()
-	go processMessages(messageChan)
 	http.HandleFunc("/qlmws", qlmWsConnect)
 	http.ListenAndServe("localhost:8000", nil) // ignore err for now..
 }

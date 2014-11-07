@@ -6,38 +6,77 @@ import (
 	"time"
 )
 
-type Datastore interface {
-	Read(r *Request)
-	Write(r *Request)
-	Cancel(rId string)
+/*
+
+  This is the InMemory store, that will store only the latest available data on a Map.
+
+*/
+
+type InMemoryStore struct {
+	mu        sync.RWMutex
+	trackMu   sync.Mutex
+	datastore map[string]string
+	tracking  map[string]chan struct{}
 }
 
-var mu = &sync.RWMutex{}    // Datastore Mutex, RW mutex to allow multiple readers
-var trackMu = &sync.Mutex{} // Tracking map Mutex
-var datastore = make(map[string]string)
-var tracking = make(map[string]chan struct{})
-
-type Data struct {
-	Node        string
-	Measurement string
-	Value       string // Or something else.. do we even need this struct?
+// Methods required by the Datastore interface
+func NewInMemoryStore() *InMemoryStore {
+	m := new(InMemoryStore)
+	m.datastore = make(map[string]string)
+	m.tracking = make(map[string]chan struct{})
+	return m
 }
 
-type Request struct {
-	RequestId string
-	Reply     chan string // Pointer?
-	Interval  int32
-	ToWrite   Data
+func (m *InMemoryStore) Read(r *Request) error {
+	if _, found := m.datastore[m.key(r)]; found {
+		if r.Interval > 0 {
+			reply := m.repeat(r)
+			m.trackMu.Lock()
+			m.tracking[r.RequestId] = reply // Store the quit channel
+			m.trackMu.Unlock()
+		} else {
+			m.read(r.ToWrite.Node, r.ToWrite.Measurement, r.Reply)
+		}
+	} else {
+		return errors.New("Could not fetch requested data")
+	}
+	return nil
 }
 
-func repeat(r *Request) chan struct{} {
+func (m *InMemoryStore) Write(r *Request) error {
+	key := m.key(r)
+
+	m.mu.Lock()
+	m.datastore[key] = r.ToWrite.Value
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *InMemoryStore) Cancel(requestId string) error {
+	m.trackMu.Lock()
+	defer m.trackMu.Unlock()
+
+	if _, found := m.tracking[requestId]; found {
+		close(m.tracking[requestId])
+		delete(m.tracking, requestId)
+	} else {
+		errors.New("No subscription found for " + requestId)
+	}
+	return nil
+}
+
+// Internal methods
+
+// @TODO Refactor this to some sort of util class to accept datastore & function to use
+// This is general purpose for any datastore implementation
+func (m *InMemoryStore) repeat(r *Request) chan struct{} {
 	ticker := time.NewTicker(time.Duration(r.Interval) * time.Second)
 	quit := make(chan struct{})
 	go func() {
 		for {
 			select {
 			case <-ticker.C:
-				read(r.ToWrite.Node, r.ToWrite.Measurement, r.Reply)
+				m.read(r.ToWrite.Node, r.ToWrite.Measurement, r.Reply)
 			case <-quit:
 				ticker.Stop()
 				return
@@ -47,60 +86,16 @@ func repeat(r *Request) chan struct{} {
 	return quit
 }
 
-// Do we need to synchronize with channels the access to this routing store?
-// Yes, but later.. either with mutex or with just single channel ..
-
-func read(node string, measurement string, reply chan string) {
-	mu.RLock()
-	reply <- datastore[keyFormat(node, measurement)]
-	mu.RUnlock()
+func (m *InMemoryStore) read(node string, measurement string, reply chan string) {
+	m.mu.RLock()
+	reply <- m.datastore[keyFormat(node, measurement)]
+	m.mu.RUnlock()
 }
 
 func keyFormat(node string, measurement string) string {
 	return node + ":" + measurement
 }
 
-func key(r *Request) string {
+func (m *InMemoryStore) key(r *Request) string {
 	return keyFormat(r.ToWrite.Node, r.ToWrite.Measurement)
-}
-
-func Read(r *Request) error {
-	// At the end / defer, create new go func() { sleep; fetch } which listens for cancel?
-	if _, found := datastore[key(r)]; found {
-		// Value was found, return Data
-		if r.Interval > 0 {
-			reply := repeat(r)
-			trackMu.Lock()
-			tracking[r.RequestId] = reply // Store the quit channel
-			trackMu.Unlock()
-		} else {
-			read(r.ToWrite.Node, r.ToWrite.Measurement, r.Reply)
-		}
-	} else {
-		// Value was not found, return error
-		return errors.New("Could not fetch requested data")
-	}
-	return nil
-}
-
-func Write(r *Request) error {
-	key := key(r)
-
-	mu.Lock()
-	datastore[key] = r.ToWrite.Value
-	mu.Unlock()
-	return nil
-}
-
-func Cancel(requestId string) error {
-	if _, found := tracking[requestId]; found {
-		// it was a valid key
-		trackMu.Lock()
-		close(tracking[requestId])
-		delete(tracking, requestId)
-		trackMu.Unlock()
-	} else {
-		errors.New("No subscription found for " + requestId)
-	}
-	return nil
 }

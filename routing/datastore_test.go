@@ -5,15 +5,17 @@ import (
 )
 
 func TestReadWrite(t *testing.T) {
+	s := NewInMemoryStore()
+
 	c := make(chan string)
 	d := Data{"node", "measurement", "value"}
 	r := &Request{"1", c, 0, d}
-	err := Write(r)
+	err := s.Write(r)
 	if err != nil {
 		t.Fail()
 	}
 
-	go Read(r)
+	go s.Read(r)
 
 	value := <-c
 	if len(value) != 5 {
@@ -21,20 +23,6 @@ func TestReadWrite(t *testing.T) {
 	}
 }
 
-func TestRead(t *testing.T) {
-
-}
-
 func TestCancel(t *testing.T) {
 	t.Fail()
 }
-
-// Wait a moment..
-
-/*
-We need:
- - Function that reads data and passes it to a chan
- - Fetch that will repeat the above function
- - Cancel that would remove the subscription.. so:
-   - We need to map those functions (well, their quit channels to requestIds)
-*/
