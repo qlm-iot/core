@@ -31,12 +31,8 @@ func (ws *wsConn) receiving() {
 		}
 		switch mtype {
 		case websocket.BinaryMessage:
-			routing.Process(msg, db)
-		case websocket.TextMessage:
-			/*
-				Handle Close messages here also, so we know when to remove someone from subscriptions (maybe?) and/or from the
-				list of available agents.
-			*/
+			routing.Process(msg, db, ws)
+		case websocket.CloseMessage:
 		default:
 		}
 
@@ -44,15 +40,17 @@ func (ws *wsConn) receiving() {
 }
 
 func (ws *wsConn) sending() {
-	/*
-		for {
-			var msg []byte
-			select {
-			case msg = <-ws.send:
-				// Send back to the webSocket Channel?
+	for {
+		var msg []byte
+		select {
+		case msg = <-ws.send:
+			// Send back to the webSocket Channel?
+			if err := ws.conn.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+				// Connection has failed, we should probably close it?
+				fmt.Println(err.Error)
 			}
 		}
-	*/
+	}
 }
 
 func qlmWsConnect(w http.ResponseWriter, r *http.Request) {
@@ -86,4 +84,5 @@ func main() {
 	flag.Parse()
 	http.HandleFunc("/qlmws", qlmWsConnect)
 	http.ListenAndServe("localhost:8000", nil) // ignore err for now..
+	fmt.Println("Waiting for connections on port 8000")
 }
