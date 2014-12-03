@@ -7,9 +7,9 @@ type Datastore interface {
 }
 
 type Data struct {
-	// Node        string
 	Measurement string
-	Value       string // Or something else.. do we even need this struct?
+	Value       string
+	Timestamp   int64
 }
 
 type Write struct {
@@ -20,8 +20,7 @@ type Write struct {
 type Request struct {
 	Node         string
 	Measurements []string
-	ReplyChan    chan Reply // Pointer?
-	// Interval     int32 // Move to QLM part
+	ReplyChan    chan Reply
 }
 
 type Reply struct {

@@ -4,11 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	// "time"
+	"time"
 )
 
 /*
   This is the InMemory store which will store only the latest available data.
+  To store historical data also, change datastore to []Data and adjust some queries
 */
 type Tracking struct {
 	requestId string
@@ -25,7 +26,7 @@ type InMemoryStore struct {
 	mu           sync.RWMutex
 	trackMu      sync.Mutex
 	subsMu       sync.RWMutex
-	datastore    map[string]map[string]string // Node, datasource, value
+	datastore    map[string]map[string]Data
 	tracking     map[string]*Tracking
 	subscription map[Key][]*Tracking
 }
@@ -33,14 +34,14 @@ type InMemoryStore struct {
 // Methods required by the Datastore interface
 func NewInMemoryStore() *InMemoryStore {
 	m := new(InMemoryStore)
-	m.datastore = make(map[string]map[string]string)
+	m.datastore = make(map[string]map[string]Data)
 	m.tracking = make(map[string]*Tracking)
 	m.subscription = make(map[Key][]*Tracking)
 	return m
 }
 
 /*
-  Equals subscription request..
+  Equals subscription request.. missing immediate read
 */
 func (m *InMemoryStore) Read(r *Request) (error, Reply) {
 	rId := m.requestId()
@@ -81,18 +82,22 @@ func (m *InMemoryStore) Write(w *Write) (error, Reply) {
 	// Check that we have node registered..
 	node, found := m.datastore[w.Node]
 	if !found {
-		m.datastore[w.Node] = make(map[string]string)
+		m.datastore[w.Node] = make(map[string]Data)
 	}
 
-	for _, measurement := range node {
-		if _, ok := datapoints[measurement]; !ok {
-			delete(m.subscription, Key{Node: w.Node, Measurement: measurement})
-			delete(m.datastore[w.Node], measurement)
+	for _, datas := range node {
+		if _, ok := datapoints[datas.Measurement]; !ok {
+			delete(m.subscription, Key{Node: w.Node, Measurement: datas.Measurement})
+			delete(m.datastore[w.Node], datas.Measurement)
 		}
 	}
 
 	for _, data := range w.Datapoints {
-		node[data.Measurement] = data.Value
+		if data.Timestamp < 1 {
+			// Add current timestamp if none was given
+			data.Timestamp = time.Now().Unix()
+		}
+		node[data.Measurement] = data
 		trackKey := Key{Node: w.Node, Measurement: data.Measurement}
 		m.publish(trackKey, data.Value)
 	}
@@ -108,24 +113,18 @@ func (m *InMemoryStore) Cancel(requestId string) error {
 	}()
 	m.subsMu.Lock()
 
-	if t, found := m.tracking[requestId]; found {
-		for _, k := range t.subs {
-			for i, tt := range m.subscription[k] {
-				if tt.requestId == requestId {
-					// m.subsription[k] = []*Tracking
-					// tt = *Tracking. mmkay..
-					// tt se on..
-					d := append(tt[:i], tt[i+1:])
-					m.subscription[k] = d
-					/*
-						h := m.subscription[k]
-						h = append(h[:i], h[i+1:])
-						m.subscription[k] = h
-					*/
-					// m.subscription[k] = append(m.subscription[:i], m.subscription[i+1:])
+	if _, found := m.tracking[requestId]; found {
+		/*
+			for _, k := range t.subs {
+				for i, tt := range m.subscription[k] {
+					if tt.requestId == requestId {
+						d := append(tt[:i], tt[i+1:])
+						m.subscription[k] = d
+					}
 				}
 			}
-		}
+		*/
+		delete(m.tracking, requestId)
 	} else {
 		return errors.New("No subscription found for " + requestId)
 	}
@@ -175,11 +174,6 @@ func (m *InMemoryStore) read(node string, measurement string, reply chan string)
 		reply <- m.datastore[keyFormat(node, measurement)]
 		m.mu.RUnlock()
 	*/
-}
-
-func (m *InMemoryStore) key(r *Request) string {
-	return ""
-	//return fmt.Sprint("%s:%s", r.ToWrite.Node, r.ToWrite.Measurement)
 }
 
 var nextId int = 0
