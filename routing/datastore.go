@@ -132,42 +132,6 @@ func (m *InMemoryStore) Cancel(requestId string) error {
 	return nil
 }
 
-/*
-TODO:
-If no call-back address is provided, then the responding QLM node SHOULD store the
-data acquired for the subscription for later retrieval with a read message that contains the
-corresponding requestID.
-
--> subscriptions should always create backing queue (chan), instead of our polling method only..
-
-TODO2: Create and store requestIds.. they're not coming in the subscriptions. They must not come..
-*/
-
-// Internal methods
-
-// @TODO Refactor this to some sort of util class to accept datastore & function to use
-// This is general purpose for any datastore implementation
-
-// This should be only for interval requests.. if there's listener for every active, we should
-// block on chan read (which is filled on every write request, if there's a listener for it)
-// @TODO This should be in the QLM layer.. not here!
-/*
-func (m *InMemoryStore) repeat(r *Request) chan struct{} {
-	ticker := time.NewTicker(time.Duration(r.Interval) * time.Second)
-	quit := make(chan struct{})
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-			case <-quit:
-				ticker.Stop()
-				return
-			}
-		}
-	}()
-	return quit
-}
-*/
 func (m *InMemoryStore) read(node string, measurement string, reply chan string) {
 	/*
 		m.mu.RLock()

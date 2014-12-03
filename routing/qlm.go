@@ -1,10 +1,21 @@
 package routing
 
 import (
+	"sync"
+	"time"
 	// "github.com/qlm-iot/core"
 	"github.com/qlm-iot/qlm/df"
 	"github.com/qlm-iot/qlm/mi"
 )
+
+var mutex sync.Mutex
+var subscriptions map[string]*Connection
+var intervals map[string]chan struct{}
+
+func init() {
+	subscriptions = make(map[string]*Connection)
+	intervals = make(map[string]chan struct{})
+}
 
 func payload(message *mi.Message) (*df.Objects, error) {
 	return df.Unmarshal([]byte(message.Data))
@@ -14,11 +25,11 @@ func Process(msg []byte, db Datastore, c *Connection) {
 	envelope, err := mi.Unmarshal(msg)
 	if err == nil {
 		if cancel := envelope.Cancel; cancel != nil {
-			processCancel(cancel, db)
+			go processCancel(cancel, db)
 		}
 
 		if read := envelope.Read; read != nil {
-			processRead(read, db, c)
+			go processRead(read, db, c)
 		}
 
 		if write := envelope.Write; write != nil {
@@ -30,6 +41,8 @@ func Process(msg []byte, db Datastore, c *Connection) {
 func processCancel(c *mi.CancelRequest, db Datastore) {
 	if len(c.RequestIds) > 0 {
 		for _, rId := range c.RequestIds {
+			// Notify the close channel and the datastore
+			<-intervals[rId.Text]
 			db.Cancel(rId.Text)
 		}
 	}
@@ -37,7 +50,7 @@ func processCancel(c *mi.CancelRequest, db Datastore) {
 
 func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
 
-	rc := make(chan Reply) // This is where the data will go
+	rc := make(chan Reply) // This is where the data will come from datastore
 
 	// Support single read only for now..
 	// Almost equal to write request, so refactor these..
@@ -49,7 +62,18 @@ func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
 			mes = append(mes, i.Name)
 		}
 		req := &Request{Node: id, ReplyChan: rc, Measurements: mes}
-		db.Read(req) // err, reply -> requestId is the reply
+		err, reply := db.Read(req) // err, reply -> requestId is the reply
+		if err == nil {
+			mutex.Lock()
+			subscriptions[reply.RequestId] = c
+			mutex.Unlock()
+			if r.Interval > 0 {
+				repeat(r.Interval, rc, c, reply.RequestId)
+			} else {
+				// Direct read?
+			}
+		}
+
 	}
 }
 
@@ -89,21 +113,55 @@ func createResponse(code string) ([]byte, error) {
 	return mi.Marshal(envelope)
 }
 
-func repeat(interval int32, rc chan Reply) {
-	// Repeat read.. subscription type of thingie..
-	/*
-		ticker := time.NewTicker(time.Duration(r.Interval) * time.Second)
-		quit := make(chan struct{})
-		go func() {
-			for {
-				select {
-				case <-ticker.C:
-				case <-quit:
-					ticker.Stop()
-					return
-				}
+// Create replyPart here..?
+func clear(rc chan Reply) []df.Object {
+	objects := make([]df.Object, 0, 5)
+	for {
+		select {
+		case reply, open := <-rc:
+			if open {
+				id := &df.QLMID{Text: reply.Node}
+				infoitems := to_infoitems(reply.Datapoints)
+				object := df.Object{InfoItems: infoitems, Id: id}
+				objects = append(objects, object)
 			}
-		}()
-		return quit
-	*/
+		default:
+			return objects // Channel is empty
+		}
+	}
+}
+
+// Clean the replyChan on every interval and send the data to the websocket
+// @TODO What if it's not a persistent connection? Next layer does the buffering?
+func repeat(interval float64, rc chan Reply, c *Connection, requestId string) {
+	ticker := time.NewTicker(time.Duration(interval) * time.Second)
+	// add another ticker for ttl?
+	quit := make(chan struct{})
+	mutex.Lock()
+	intervals[requestId] = quit
+	mutex.Unlock()
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				// objects := clear(rc)
+			case <-quit:
+				ticker.Stop()
+				mutex.Lock()
+				delete(intervals, requestId)
+				mutex.Unlock()
+				return
+			}
+		}
+	}()
+}
+
+func to_infoitems(datapoints []Data) []df.InfoItem {
+	infoitems := make([]df.InfoItem, len(datapoints))
+	for _, data := range datapoints {
+		values := make([]df.Value, 0, 1)
+		values = append(values, df.Value{UnixTime: data.Timestamp, Text: data.Value})
+		infoitems = append(infoitems, df.InfoItem{Name: data.Measurement, Values: values})
+	}
+	return infoitems
 }
