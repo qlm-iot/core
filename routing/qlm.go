@@ -1,6 +1,7 @@
 package routing
 
 import (
+	// "fmt"
 	"sync"
 	"time"
 	// "github.com/qlm-iot/core"
@@ -25,15 +26,14 @@ func Process(msg []byte, db Datastore, c *Connection) {
 	envelope, err := mi.Unmarshal(msg)
 	if err == nil {
 		if cancel := envelope.Cancel; cancel != nil {
-			go processCancel(cancel, db)
-		}
-
-		if read := envelope.Read; read != nil {
-			go processRead(read, db, c)
-		}
-
-		if write := envelope.Write; write != nil {
-			go processWrite(write, db, c)
+			processCancel(cancel, db)
+		} else if read := envelope.Read; read != nil {
+			processRead(read, db, c)
+		} else if write := envelope.Write; write != nil {
+			processWrite(write, db, c)
+		} else {
+			msg, _ := createResponse("200")
+			c.Send <- msg
 		}
 	}
 }
@@ -49,31 +49,35 @@ func processCancel(c *mi.CancelRequest, db Datastore) {
 }
 
 func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
-
 	rc := make(chan Reply) // This is where the data will come from datastore
 
 	// Support single read only for now..
 	// Almost equal to write request, so refactor these..
-	rr, _ := payload(r.Message)
-	for _, o := range rr.Objects {
-		id := o.Id.Text
-		mes := make([]string, len(o.InfoItems))
-		for _, i := range o.InfoItems {
-			mes = append(mes, i.Name)
-		}
-		req := &Request{Node: id, ReplyChan: rc, Measurements: mes}
-		err, reply := db.Read(req) // err, reply -> requestId is the reply
-		if err == nil {
-			mutex.Lock()
-			subscriptions[reply.RequestId] = c
-			mutex.Unlock()
-			if r.Interval > 0 {
-				repeat(r.Interval, rc, c, reply.RequestId)
-			} else {
-				// Direct read?
+	if r.Message != nil {
+		rr, _ := payload(r.Message)
+		for _, o := range rr.Objects {
+			id := o.Id.Text
+			mes := make([]string, len(o.InfoItems))
+			for _, i := range o.InfoItems {
+				mes = append(mes, i.Name)
 			}
-		}
+			req := &Request{Node: id, ReplyChan: rc, Measurements: mes}
+			err, reply := db.Read(req) // err, reply -> requestId is the reply
+			if err == nil {
+				mutex.Lock()
+				subscriptions[reply.RequestId] = c
+				mutex.Unlock()
+				if r.Interval > 0 {
+					repeat(r.Interval, rc, c, reply.RequestId)
+				} else {
+					// Direct read?
+				}
+			}
 
+		}
+	} else {
+		msg, _ := createResponse("200")
+		c.Send <- msg
 	}
 }
 
@@ -113,7 +117,8 @@ func createResponse(code string) ([]byte, error) {
 	return mi.Marshal(envelope)
 }
 
-// Create replyPart here..?
+// Create replyPart here..? Call on read-request to empty the channel, if no callback is
+// provided?
 func clear(rc chan Reply) []df.Object {
 	objects := make([]df.Object, 0, 5)
 	for {

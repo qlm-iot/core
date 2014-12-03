@@ -83,6 +83,7 @@ func (m *InMemoryStore) Write(w *Write) (error, Reply) {
 	node, found := m.datastore[w.Node]
 	if !found {
 		m.datastore[w.Node] = make(map[string]Data)
+		node = m.datastore[w.Node]
 	}
 
 	for _, datas := range node {

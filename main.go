@@ -21,6 +21,6 @@ func qlmHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	flag.Parse()
 	http.HandleFunc("/qlmws", qlmHandler)
-	http.ListenAndServe("localhost:8000", nil) // ignore err for now..
 	fmt.Println("Waiting for connections on port 8000")
+	http.ListenAndServe("localhost:8000", nil) // ignore err for now..
 }
