@@ -23,12 +23,17 @@ func qlmHandler(w http.ResponseWriter, r *http.Request) {
 	routing.QlmWsConnect(w, r, db)
 }
 
+func qlmInterface(w http.ResponseWriter, r *http.Request) {
+	routing.QlmInterface(w, r, db)
+}
+
 func main() {
 	flag.Parse()
 	r := mux.NewRouter()
-	s := r.PathPrefix("/qlm/Objects").Subrouter()
-	s.HandleFunc("/{node}/", qlmPoller)
-	s.HandleFunc("/", qlmPoller)
+	s := r.PathPrefix("/qlm").Subrouter()
+	s.HandleFunc("/Objects/{node}/", qlmPoller)
+	s.HandleFunc("/Objects/", qlmPoller)
+	s.HandleFunc("/", qlmInterface)
 	r.HandleFunc("/qlmws", qlmHandler)
 	http.Handle("/", r)
 	fmt.Println("Waiting for connections on port 8000")

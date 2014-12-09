@@ -1,7 +1,6 @@
 package routing
 
 import (
-	"fmt"
 	"github.com/qlm-iot/qlm/df"
 	"github.com/qlm-iot/qlm/mi"
 	"sync"
@@ -54,7 +53,7 @@ func processCancel(c *mi.CancelRequest, db Datastore) {
 }
 
 func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
-	rc := make(chan Reply, 100) // This is where the data will come from datastore
+	rc := make(chan Reply, 8192) // This is where the data will come from datastore
 
 	// Support single read only for now..
 	// Almost equal to write request, so refactor these..
@@ -177,7 +176,6 @@ Clear:
 		select {
 		case reply, open := <-rc:
 			if open {
-				fmt.Print("Got something to clear..")
 				id := &df.QLMID{Text: reply.Node}
 				infoitems := to_infoitems(reply.Datapoints)
 				object := df.Object{InfoItems: infoitems, Id: id}

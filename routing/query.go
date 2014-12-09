@@ -26,3 +26,15 @@ func QlmQuery(w http.ResponseWriter, r *http.Request, db Datastore) {
 	}
 	w.Write(resp)
 }
+
+func QlmInterface(w http.ResponseWriter, r *http.Request, db Datastore) {
+	req := r.FormValue("msg")
+	wait := make(chan []byte, 5)
+	c := &Connection{Send: wait}
+
+	if req != "" {
+		Process([]byte(req), db, c)
+	}
+	msg := <-wait
+	w.Write(msg)
+}

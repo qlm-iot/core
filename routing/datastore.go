@@ -100,7 +100,6 @@ func (m *InMemoryStore) Write(w *Write) (error, Reply) {
 		}
 		node[data.Measurement] = data
 		trackKey := Key{Node: w.Node, Measurement: data.Measurement}
-		fmt.Print("Publishing ..")
 		m.publish(trackKey, data.Value, data.Timestamp)
 	}
 
@@ -150,19 +149,15 @@ func (m *InMemoryStore) requestId() string {
 }
 
 func (m *InMemoryStore) publish(key Key, value string, timestamp int64) error {
-	fmt.Print("Getting lock..")
 	m.subsMu.RLock()
 	defer m.subsMu.RUnlock()
-	fmt.Print("Got lock")
 
 	if ts, found := m.subscription[key]; found {
 		for _, t := range ts {
 			d := Data{Measurement: key.Measurement, Value: value, Timestamp: timestamp}
 			data := []Data{d}
 			r := Reply{RequestId: t.requestId, Node: key.Node, Datapoints: data}
-			fmt.Print("Pushing to t.reply")
 			t.reply <- r
-			fmt.Print("Pushed to t.reply")
 		}
 	}
 	return nil
