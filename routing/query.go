@@ -7,6 +7,7 @@ import (
 
 func QlmQuery(w http.ResponseWriter, r *http.Request, db Datastore) {
 	vars := mux.Vars(r)
+	w.Header().Set("Content-Type", "application/xml")
 	if node, found := vars["node"]; found {
 		// Request node details
 		resp, _ := KeyList(node, db)
