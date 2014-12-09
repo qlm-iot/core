@@ -170,3 +170,21 @@ func keymap(dataslice []Data) map[string]struct{} {
 	}
 	return datapoints
 }
+
+func (m *InMemoryStore) NodeList() []string {
+	keystore := m.datastore
+	keys := make([]string, 0, len(keystore))
+	for k := range keystore {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func (m *InMemoryStore) SourceList(node string) []string {
+	keystore := m.datastore[node]
+	keys := make([]string, 0, len(keystore))
+	for k := range keystore {
+		keys = append(keys, k)
+	}
+	return keys
+}

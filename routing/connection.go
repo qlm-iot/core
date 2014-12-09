@@ -22,12 +22,15 @@ func (ws *Connection) receiving(db Datastore) {
 		mtype, msg, err := ws.conn.ReadMessage()
 		if err != nil {
 			fmt.Println(err.Error)
+			ws.conn.Close()
 			return
 		}
 		switch mtype {
 		case websocket.BinaryMessage:
 			Process(msg, db, ws)
 		case websocket.CloseMessage:
+			ws.conn.Close()
+			return
 		default:
 		}
 
@@ -43,6 +46,8 @@ func (ws *Connection) sending() {
 			if err := ws.conn.WriteMessage(websocket.BinaryMessage, msg); err != nil {
 				// Connection has failed, we should probably close it?
 				fmt.Println(err.Error)
+				ws.conn.Close()
+				return
 			}
 		}
 	}

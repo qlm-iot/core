@@ -4,6 +4,8 @@ type Datastore interface {
 	Read(r *Request) (error, Reply)
 	Write(r *Write) (error, Reply)
 	Cancel(rId string) error
+	NodeList() []string
+	SourceList(node string) []string
 }
 
 type Data struct {

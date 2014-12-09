@@ -1,12 +1,10 @@
 package routing
 
 import (
-	// "fmt"
-	"sync"
-	"time"
-	// "github.com/qlm-iot/core"
 	"github.com/qlm-iot/qlm/df"
 	"github.com/qlm-iot/qlm/mi"
+	"sync"
+	"time"
 )
 
 var mutex sync.Mutex
@@ -32,7 +30,7 @@ func Process(msg []byte, db Datastore, c *Connection) {
 		} else if write := envelope.Write; write != nil {
 			processWrite(write, db, c)
 		} else {
-			msg, _ := createResponse("200")
+			msg, _ := createResponse("200", "OK")
 			c.Send <- msg
 		}
 	}
@@ -72,11 +70,14 @@ func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
 				} else {
 					// Direct read?
 				}
+			} else {
+				msg, _ := createResponse("404", err.Error())
+				c.Send <- msg
 			}
 
 		}
 	} else {
-		msg, _ := createResponse("200")
+		msg, _ := createResponse("200", "OK")
 		c.Send <- msg
 	}
 }
@@ -95,21 +96,48 @@ func processWrite(w *mi.WriteRequest, db Datastore, c *Connection) {
 		write := &Write{Node: id, Datapoints: datapoints}
 		err, _ := db.Write(write)
 		if err == nil {
-			if response, err := createResponse("200"); err == nil {
+			if response, err := createResponse("200", "OK"); err == nil {
 				c.Send <- response
 			}
 		}
 	}
 }
 
-func createResponse(code string) ([]byte, error) {
-	envelope := mi.OmiEnvelope{
+func createResponseTemplate(code string) mi.OmiEnvelope {
+	return mi.OmiEnvelope{
 		Version: "1.0",
 		Ttl:     0,
 		Response: &mi.Response{
 			Results: []mi.RequestResult{
 				mi.RequestResult{
 					Return: &mi.Return{ReturnCode: code},
+				},
+			},
+		},
+	}
+}
+
+func createErrorResponse(code string, desc string) ([]byte, error) {
+	envelope := createResponseTemplate(code)
+	ret := envelope.Response.Results[0].Return
+	ret.Description = desc
+	return mi.Marshal(envelope)
+}
+
+func createMessageResponse(code string, objects []byte) ([]byte, error) {
+	envelope := createResponseTemplate(code)
+	envelope.Response.Results[0].Message = &mi.Message{Data: string(objects)}
+	return mi.Marshal(envelope)
+}
+
+func createResponse(code string, desc string) ([]byte, error) {
+	envelope := mi.OmiEnvelope{
+		Version: "1.0",
+		Ttl:     0,
+		Response: &mi.Response{
+			Results: []mi.RequestResult{
+				mi.RequestResult{
+					Return: &mi.Return{ReturnCode: code, Description: desc},
 				},
 			},
 		},
@@ -140,7 +168,7 @@ func clear(rc chan Reply) []df.Object {
 // @TODO What if it's not a persistent connection? Next layer does the buffering?
 func repeat(interval float64, rc chan Reply, c *Connection, requestId string) {
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
-	// add another ticker for ttl?
+	// NewTimer for TTL support..
 	quit := make(chan struct{})
 	mutex.Lock()
 	intervals[requestId] = quit
@@ -169,4 +197,29 @@ func to_infoitems(datapoints []Data) []df.InfoItem {
 		infoitems = append(infoitems, df.InfoItem{Name: data.Measurement, Values: values})
 	}
 	return infoitems
+}
+
+func NodeList(db Datastore) ([]byte, error) {
+	nodes := db.NodeList()
+	objects := make([]df.Object, 0, len(nodes))
+	for _, k := range nodes {
+		id := &df.QLMID{Text: k}
+		object := df.Object{Id: id}
+		objects = append(objects, object)
+	}
+	msg, _ := df.Marshal(df.Objects{Objects: objects})
+	return createMessageResponse("200", msg)
+}
+
+func KeyList(node string, db Datastore) ([]byte, error) {
+	keys := db.SourceList(node)
+	infoitems := make([]df.InfoItem, 0, len(keys))
+	for _, k := range keys {
+		infoitems = append(infoitems, df.InfoItem{Name: k})
+	}
+	object := df.Object{Id: &df.QLMID{Text: node}, InfoItems: infoitems}
+	objects := make([]df.Object, 0, 1)
+	objects = append(objects, object)
+	msg, _ := df.Marshal(df.Objects{Objects: objects})
+	return createMessageResponse("200", msg)
 }
