@@ -7,12 +7,18 @@ import (
 	"time"
 )
 
+type Waiter struct {
+	conn *Connection
+	temp chan []byte
+	rc   chan Reply
+}
+
 var mutex sync.Mutex
-var subscriptions map[string]*Connection
+var subscriptions map[string]Waiter
 var intervals map[string]chan struct{}
 
 func init() {
-	subscriptions = make(map[string]*Connection)
+	subscriptions = make(map[string]Waiter)
 	intervals = make(map[string]chan struct{})
 }
 
@@ -30,7 +36,7 @@ func Process(msg []byte, db Datastore, c *Connection) {
 		} else if write := envelope.Write; write != nil {
 			processWrite(write, db, c)
 		} else {
-			msg, _ := createResponse("200", "OK")
+			msg, _ := createResponse("200")
 			c.Send <- msg
 		}
 	}
@@ -63,21 +69,33 @@ func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
 			err, reply := db.Read(req) // err, reply -> requestId is the reply
 			if err == nil {
 				mutex.Lock()
-				subscriptions[reply.RequestId] = c
+				t := make(chan []byte)
+				w := Waiter{conn: c, temp: t, rc: rc}
+				subscriptions[reply.RequestId] = w
 				mutex.Unlock()
 				if r.Interval > 0 {
-					repeat(r.Interval, rc, c, reply.RequestId)
+					go repeat(r.Interval, rc, t, reply.RequestId)
+					req, _ := createReqReply("200", reply.RequestId)
+					c.Send <- req
 				} else {
-					// Direct read?
+					msg, _ := createMsg(clear(rc))
+					envelope, _ := createMessageResponse("200", msg)
+					c.Send <- envelope
 				}
 			} else {
-				msg, _ := createResponse("404", err.Error())
+				msg, _ := createErrorResponse("404", err.Error())
 				c.Send <- msg
 			}
 
 		}
+	} else if len(r.RequestIds) > 0 {
+		rId := r.RequestIds[0].Text
+		w := subscriptions[rId]
+		msg, _ := createMsg(clear(w.rc))
+		envelope, _ := createMessageResponse("200", msg)
+		c.Send <- envelope
 	} else {
-		msg, _ := createResponse("200", "OK")
+		msg, _ := createResponse("200")
 		c.Send <- msg
 	}
 }
@@ -96,7 +114,7 @@ func processWrite(w *mi.WriteRequest, db Datastore, c *Connection) {
 		write := &Write{Node: id, Datapoints: datapoints}
 		err, _ := db.Write(write)
 		if err == nil {
-			if response, err := createResponse("200", "OK"); err == nil {
+			if response, err := createResponse("200"); err == nil {
 				c.Send <- response
 			}
 		}
@@ -130,25 +148,26 @@ func createMessageResponse(code string, objects []byte) ([]byte, error) {
 	return mi.Marshal(envelope)
 }
 
-func createResponse(code string, desc string) ([]byte, error) {
-	envelope := mi.OmiEnvelope{
-		Version: "1.0",
-		Ttl:     0,
-		Response: &mi.Response{
-			Results: []mi.RequestResult{
-				mi.RequestResult{
-					Return: &mi.Return{ReturnCode: code, Description: desc},
-				},
-			},
-		},
-	}
+func createResponse(code string) ([]byte, error) {
+	envelope := createResponseTemplate(code)
 	return mi.Marshal(envelope)
+}
+
+func createReqReply(code string, requestId string) ([]byte, error) {
+	envelope := createResponseTemplate(code)
+	envelope.Response.Results[0].RequestId = &mi.Id{Text: requestId}
+	return mi.Marshal(envelope)
+}
+
+func createMsg(objects []df.Object) ([]byte, error) {
+	return df.Marshal(df.Objects{Objects: objects})
 }
 
 // Create replyPart here..? Call on read-request to empty the channel, if no callback is
 // provided?
 func clear(rc chan Reply) []df.Object {
 	objects := make([]df.Object, 0, 5)
+Clear:
 	for {
 		select {
 		case reply, open := <-rc:
@@ -159,14 +178,15 @@ func clear(rc chan Reply) []df.Object {
 				objects = append(objects, object)
 			}
 		default:
-			return objects // Channel is empty
+			break Clear
 		}
 	}
+	return objects
 }
 
 // Clean the replyChan on every interval and send the data to the websocket
 // @TODO What if it's not a persistent connection? Next layer does the buffering?
-func repeat(interval float64, rc chan Reply, c *Connection, requestId string) {
+func repeat(interval float64, rc chan Reply, t chan []byte, requestId string) {
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	// NewTimer for TTL support..
 	quit := make(chan struct{})
@@ -177,7 +197,8 @@ func repeat(interval float64, rc chan Reply, c *Connection, requestId string) {
 		for {
 			select {
 			case <-ticker.C:
-				// objects := clear(rc)
+				msg, _ := createMsg(clear(rc))
+				t <- msg
 			case <-quit:
 				ticker.Stop()
 				mutex.Lock()
@@ -207,7 +228,7 @@ func NodeList(db Datastore) ([]byte, error) {
 		object := df.Object{Id: id}
 		objects = append(objects, object)
 	}
-	msg, _ := df.Marshal(df.Objects{Objects: objects})
+	msg, _ := createMsg(objects)
 	return createMessageResponse("200", msg)
 }
 
@@ -220,6 +241,6 @@ func KeyList(node string, db Datastore) ([]byte, error) {
 	object := df.Object{Id: &df.QLMID{Text: node}, InfoItems: infoitems}
 	objects := make([]df.Object, 0, 1)
 	objects = append(objects, object)
-	msg, _ := df.Marshal(df.Objects{Objects: objects})
+	msg, _ := createMsg(objects)
 	return createMessageResponse("200", msg)
 }
