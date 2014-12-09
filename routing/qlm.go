@@ -62,7 +62,7 @@ func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
 		rr, _ := payload(r.Message)
 		for _, o := range rr.Objects {
 			id := o.Id.Text
-			mes := make([]string, len(o.InfoItems))
+			mes := make([]string, 0, len(o.InfoItems))
 			for _, i := range o.InfoItems {
 				mes = append(mes, i.Name)
 			}
@@ -109,7 +109,7 @@ func processWrite(w *mi.WriteRequest, db Datastore, c *Connection) {
 	wr, _ := payload(w.Message)
 	for _, o := range wr.Objects {
 		id := o.Id.Text
-		datapoints := make([]Data, 1)
+		datapoints := make([]Data, 0, 1)
 		for _, i := range o.InfoItems {
 			for _, v := range i.Values {
 				data := Data{Measurement: i.Name, Value: v.Text}
@@ -217,7 +217,7 @@ func repeat(interval float64, rc chan Reply, t chan []byte, requestId string) {
 }
 
 func to_infoitems(datapoints []Data) []df.InfoItem {
-	infoitems := make([]df.InfoItem, len(datapoints))
+	infoitems := make([]df.InfoItem, 0, len(datapoints))
 	for _, data := range datapoints {
 		values := make([]df.Value, 0, 1)
 		values = append(values, df.Value{UnixTime: data.Timestamp, Text: data.Value})

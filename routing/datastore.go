@@ -52,7 +52,7 @@ func (m *InMemoryStore) Read(r *Request) (error, Reply) {
 
 	if _, found := m.datastore[r.Node]; found {
 		// Create requestId for this subscription request
-		t := &Tracking{requestId: rId, reply: r.ReplyChan, subs: make([]Key, 10)}
+		t := &Tracking{requestId: rId, reply: r.ReplyChan, subs: make([]Key, 0, 10)}
 
 		// Add subscriptions for each key
 		m.subsMu.Lock()
