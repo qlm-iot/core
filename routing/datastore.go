@@ -149,7 +149,7 @@ func (m *InMemoryStore) requestId() string {
 	return fmt.Sprintf("REQ%07d", nextId)
 }
 
-func (m *InMemoryStore) publish(key Key, value string, timestamp string) error {
+func (m *InMemoryStore) publish(key Key, value string, timestamp int64) error {
 	fmt.Print("Getting lock..")
 	m.subsMu.RLock()
 	defer m.subsMu.RUnlock()
