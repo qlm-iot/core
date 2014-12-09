@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"fmt"
 	"github.com/qlm-iot/qlm/df"
 	"github.com/qlm-iot/qlm/mi"
 	"sync"
@@ -53,7 +54,7 @@ func processCancel(c *mi.CancelRequest, db Datastore) {
 }
 
 func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
-	rc := make(chan Reply) // This is where the data will come from datastore
+	rc := make(chan Reply, 100) // This is where the data will come from datastore
 
 	// Support single read only for now..
 	// Almost equal to write request, so refactor these..
@@ -78,9 +79,13 @@ func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
 					req, _ := createReqReply("200", reply.RequestId)
 					c.Send <- req
 				} else {
-					msg, _ := createMsg(clear(rc))
-					envelope, _ := createMessageResponse("200", msg)
-					c.Send <- envelope
+					/*
+						msg, _ := createMsg(clear(rc))
+						envelope, _ := createMessageResponse("200", msg)
+						c.Send <- envelope
+					*/
+					req, _ := createReqReply("200", reply.RequestId)
+					c.Send <- req
 				}
 			} else {
 				msg, _ := createErrorResponse("404", err.Error())
@@ -172,6 +177,7 @@ Clear:
 		select {
 		case reply, open := <-rc:
 			if open {
+				fmt.Print("Got something to clear..")
 				id := &df.QLMID{Text: reply.Node}
 				infoitems := to_infoitems(reply.Datapoints)
 				object := df.Object{InfoItems: infoitems, Id: id}
@@ -233,7 +239,10 @@ func NodeList(db Datastore) ([]byte, error) {
 }
 
 func KeyList(node string, db Datastore) ([]byte, error) {
-	keys := db.SourceList(node)
+	keys, err := db.SourceList(node)
+	if err != nil {
+		return nil, err
+	}
 	infoitems := make([]df.InfoItem, 0, len(keys))
 	for _, k := range keys {
 		infoitems = append(infoitems, df.InfoItem{Name: k})

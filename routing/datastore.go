@@ -100,6 +100,7 @@ func (m *InMemoryStore) Write(w *Write) (error, Reply) {
 		}
 		node[data.Measurement] = data
 		trackKey := Key{Node: w.Node, Measurement: data.Measurement}
+		fmt.Print("Publishing ..")
 		m.publish(trackKey, data.Value)
 	}
 
@@ -149,15 +150,19 @@ func (m *InMemoryStore) requestId() string {
 }
 
 func (m *InMemoryStore) publish(key Key, value string) error {
+	fmt.Print("Getting lock..")
 	m.subsMu.RLock()
 	defer m.subsMu.RUnlock()
+	fmt.Print("Got lock")
 
 	if ts, found := m.subscription[key]; found {
 		for _, t := range ts {
 			d := Data{Measurement: key.Measurement, Value: value}
 			data := []Data{d}
 			r := Reply{RequestId: t.requestId, Node: key.Node, Datapoints: data}
+			fmt.Print("Pushing to t.reply")
 			t.reply <- r
+			fmt.Print("Pushed to t.reply")
 		}
 	}
 	return nil
@@ -180,11 +185,14 @@ func (m *InMemoryStore) NodeList() []string {
 	return keys
 }
 
-func (m *InMemoryStore) SourceList(node string) []string {
-	keystore := m.datastore[node]
+func (m *InMemoryStore) SourceList(node string) ([]string, error) {
+	keystore, found := m.datastore[node]
+	if !found {
+		return nil, errors.New("Could not find node " + node)
+	}
 	keys := make([]string, 0, len(keystore))
 	for k := range keystore {
 		keys = append(keys, k)
 	}
-	return keys
+	return keys, nil
 }

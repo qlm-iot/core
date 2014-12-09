@@ -5,7 +5,7 @@ type Datastore interface {
 	Write(r *Write) (error, Reply)
 	Cancel(rId string) error
 	NodeList() []string
-	SourceList(node string) []string
+	SourceList(node string) ([]string, error)
 }
 
 type Data struct {
