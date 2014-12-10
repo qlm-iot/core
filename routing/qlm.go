@@ -30,7 +30,7 @@ func Process(msg []byte, db Datastore, c *Connection) {
 	envelope, err := mi.Unmarshal(msg)
 	if err == nil {
 		if cancel := envelope.Cancel; cancel != nil {
-			processCancel(cancel, db)
+			processCancel(cancel, db, c)
 		} else if read := envelope.Read; read != nil {
 			processRead(read, db, c)
 		} else if write := envelope.Write; write != nil {
@@ -42,14 +42,26 @@ func Process(msg []byte, db Datastore, c *Connection) {
 	}
 }
 
-func processCancel(c *mi.CancelRequest, db Datastore) {
+func processCancel(c *mi.CancelRequest, db Datastore, conn *Connection) {
 	if len(c.RequestIds) > 0 {
 		for _, rId := range c.RequestIds {
 			// Notify the close channel and the datastore
-			<-intervals[rId.Text]
+			// <-intervals[rId.Text]
 			db.Cancel(rId.Text)
+			_, found := subscriptions[rId.Text]
+			if found {
+				mutex.Lock()
+				delete(subscriptions, rId.Text)
+				mutex.Unlock()
+			} else {
+				msg, _ := createErrorResponse("404", "Subscription not found")
+				conn.Send <- msg
+				return
+			}
 		}
 	}
+	msg, _ := createResponse("200")
+	conn.Send <- msg
 }
 
 func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
@@ -93,10 +105,15 @@ func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
 		}
 	} else if len(r.RequestIds) > 0 {
 		rId := r.RequestIds[0].Text
-		w := subscriptions[rId]
-		msg, _ := createMsg(clear(w.rc))
-		envelope, _ := createMessageResponse("200", msg)
-		c.Send <- envelope
+		w, found := subscriptions[rId]
+		if found {
+			msg, _ := createMsg(clear(w.rc))
+			envelope, _ := createMessageResponse("200", msg)
+			c.Send <- envelope
+		} else {
+			msg, _ := createErrorResponse("404", "Subscription not found")
+			c.Send <- msg
+		}
 	} else {
 		msg, _ := createResponse("200")
 		c.Send <- msg
