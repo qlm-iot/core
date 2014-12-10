@@ -43,7 +43,7 @@ func NewInMemoryStore() *InMemoryStore {
 /*
   Equals subscription request.. missing immediate read
 */
-func (m *InMemoryStore) Read(r *Request) (error, Reply) {
+func (m *InMemoryStore) Subscribe(r *Request) (error, Reply) {
 	rId := m.requestId()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -71,6 +71,26 @@ func (m *InMemoryStore) Read(r *Request) (error, Reply) {
 		return errors.New("Could not fetch requested data, node does not exists"), reply
 	}
 	return nil, reply
+}
+
+func (m *InMemoryStore) ReadImmediate(r *Request) (error, Reply) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	data := make([]Data, 0, 10)
+
+	if node, found := m.datastore[r.Node]; found {
+		for _, me := range r.Measurements {
+			if v, f := node[me]; f {
+				data = append(data, v)
+			}
+		}
+		reply := Reply{Node: r.Node, Datapoints: data}
+		r.ReplyChan <- reply
+		return nil, Reply{}
+	} else {
+		return errors.New("Could not find requested information"), Reply{}
+	}
 }
 
 func (m *InMemoryStore) Write(w *Write) (error, Reply) {

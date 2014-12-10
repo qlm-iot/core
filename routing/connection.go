@@ -29,7 +29,7 @@ func (ws *Connection) receiving(db Datastore) {
 		case websocket.BinaryMessage:
 			Process(msg, db, ws)
 		case websocket.CloseMessage:
-			ws.conn.Close()
+			// ws.conn.Close()
 			return
 		default:
 		}
@@ -65,13 +65,12 @@ func QlmWsConnect(w http.ResponseWriter, r *http.Request, db Datastore) {
 
 	ws := &Connection{Recv: from, Send: to, conn: conn}
 
-	go ws.sending()
-	ws.receiving(db) // Block here
-
 	defer func() {
 		close(ws.Recv)
 		close(ws.Send)
 		ws.conn.Close()
 	}()
 
+	go ws.sending()
+	ws.receiving(db) // Block here
 }

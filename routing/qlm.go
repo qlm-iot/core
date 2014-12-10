@@ -55,8 +55,6 @@ func processCancel(c *mi.CancelRequest, db Datastore) {
 func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
 	rc := make(chan Reply, 8192) // This is where the data will come from datastore
 
-	// Support single read only for now..
-	// Almost equal to write request, so refactor these..
 	if r.Message != nil {
 		rr, _ := payload(r.Message)
 		for _, o := range rr.Objects {
@@ -66,7 +64,7 @@ func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
 				mes = append(mes, i.Name)
 			}
 			req := &Request{Node: id, ReplyChan: rc, Measurements: mes}
-			err, reply := db.Read(req) // err, reply -> requestId is the reply
+			err, reply := db.Subscribe(req) // err, reply -> requestId is the reply
 			if err == nil {
 				mutex.Lock()
 				t := make(chan []byte)
@@ -78,13 +76,14 @@ func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
 					req, _ := createReqReply("200", reply.RequestId)
 					c.Send <- req
 				} else {
-					/*
+					if err, _ := db.ReadImmediate(req); err != nil {
+						msg, _ := createErrorResponse("404", err.Error())
+						c.Send <- msg
+					} else {
 						msg, _ := createMsg(clear(rc))
 						envelope, _ := createMessageResponse("200", msg)
 						c.Send <- envelope
-					*/
-					req, _ := createReqReply("200", reply.RequestId)
-					c.Send <- req
+					}
 				}
 			} else {
 				msg, _ := createErrorResponse("404", err.Error())
@@ -167,8 +166,6 @@ func createMsg(objects []df.Object) ([]byte, error) {
 	return df.Marshal(df.Objects{Objects: objects})
 }
 
-// Create replyPart here..? Call on read-request to empty the channel, if no callback is
-// provided?
 func clear(rc chan Reply) []df.Object {
 	objects := make([]df.Object, 0, 5)
 Clear:
@@ -188,8 +185,6 @@ Clear:
 	return objects
 }
 
-// Clean the replyChan on every interval and send the data to the websocket
-// @TODO What if it's not a persistent connection? Next layer does the buffering?
 func repeat(interval float64, rc chan Reply, t chan []byte, requestId string) {
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	// NewTimer for TTL support..
