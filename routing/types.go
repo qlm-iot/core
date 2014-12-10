@@ -1,7 +1,8 @@
 package routing
 
 type Datastore interface {
-	Read(r *Request) (error, Reply)
+	Subscribe(r *Request) (error, Reply)
+	ReadImmediate(r *Request) (error, Reply)
 	Write(r *Write) (error, Reply)
 	Cancel(rId string) error
 	NodeList() []string
