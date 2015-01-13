@@ -3,6 +3,8 @@ package routing
 import (
 	"github.com/qlm-iot/qlm/df"
 	"github.com/qlm-iot/qlm/mi"
+	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -26,9 +28,13 @@ func payload(message *mi.Message) (*df.Objects, error) {
 	return df.Unmarshal([]byte(message.Data))
 }
 
+/*
+ * Entry point for QLM messages, depending on the type of the message
+ * (cancel/read/write), call the approriate method. This method is
+ * blocking.
+ */
 func Process(msg []byte, db Datastore, c *Connection) {
-	envelope, err := mi.Unmarshal(msg)
-	if err == nil {
+	if envelope, err := mi.Unmarshal(msg); err == nil {
 		if cancel := envelope.Cancel; cancel != nil {
 			processCancel(cancel, db, c)
 		} else if read := envelope.Read; read != nil {
@@ -36,9 +42,12 @@ func Process(msg []byte, db Datastore, c *Connection) {
 		} else if write := envelope.Write; write != nil {
 			processWrite(write, db, c)
 		} else {
-			msg, _ := createResponse("200")
+			msg, _ := createResponse(http.StatusOK)
 			c.Send <- msg
 		}
+	} else {
+		msg, _ := createErrorResponse(http.StatusBadRequest, "Request could not be parsed")
+		c.Send <- msg
 	}
 }
 
@@ -48,19 +57,18 @@ func processCancel(c *mi.CancelRequest, db Datastore, conn *Connection) {
 			// Notify the close channel and the datastore
 			// <-intervals[rId.Text]
 			db.Cancel(rId.Text)
-			_, found := subscriptions[rId.Text]
-			if found {
+			if _, found := subscriptions[rId.Text]; found {
 				mutex.Lock()
 				delete(subscriptions, rId.Text)
 				mutex.Unlock()
 			} else {
-				msg, _ := createErrorResponse("404", "Subscription not found")
+				msg, _ := createErrorResponse(http.StatusNotFound, "Subscription not found")
 				conn.Send <- msg
 				return
 			}
 		}
 	}
-	msg, _ := createResponse("200")
+	msg, _ := createResponse(http.StatusOK)
 	conn.Send <- msg
 }
 
@@ -85,20 +93,20 @@ func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
 				mutex.Unlock()
 				if r.Interval > 0 {
 					go repeat(r.Interval, rc, t, reply.RequestId)
-					req, _ := createReqReply("200", reply.RequestId)
+					req, _ := createReqReply(http.StatusOK, reply.RequestId)
 					c.Send <- req
 				} else {
 					if err, _ := db.ReadImmediate(req); err != nil {
-						msg, _ := createErrorResponse("404", err.Error())
+						msg, _ := createErrorResponse(http.StatusNotFound, err.Error())
 						c.Send <- msg
 					} else {
 						msg, _ := createMsg(clear(rc))
-						envelope, _ := createMessageResponse("200", msg)
+						envelope, _ := createMessageResponse(http.StatusOK, msg)
 						c.Send <- envelope
 					}
 				}
 			} else {
-				msg, _ := createErrorResponse("404", err.Error())
+				msg, _ := createErrorResponse(http.StatusNotFound, err.Error())
 				c.Send <- msg
 			}
 
@@ -108,14 +116,14 @@ func processRead(r *mi.ReadRequest, db Datastore, c *Connection) {
 		w, found := subscriptions[rId]
 		if found {
 			msg, _ := createMsg(clear(w.rc))
-			envelope, _ := createMessageResponse("200", msg)
+			envelope, _ := createMessageResponse(http.StatusOK, msg)
 			c.Send <- envelope
 		} else {
-			msg, _ := createErrorResponse("404", "Subscription not found")
+			msg, _ := createErrorResponse(http.StatusNotFound, "Subscription not found")
 			c.Send <- msg
 		}
 	} else {
-		msg, _ := createResponse("200")
+		msg, _ := createResponse(http.StatusOK)
 		c.Send <- msg
 	}
 }
@@ -134,46 +142,50 @@ func processWrite(w *mi.WriteRequest, db Datastore, c *Connection) {
 		write := &Write{Node: id, Datapoints: datapoints}
 		err, _ := db.Write(write)
 		if err == nil {
-			if response, err := createResponse("200"); err == nil {
+			if response, err := createResponse(http.StatusOK); err == nil {
 				c.Send <- response
 			}
 		}
 	}
 }
 
-func createResponseTemplate(code string) mi.OmiEnvelope {
+/*
+ * Assistant methods for creating QLM response messages
+ */
+
+func createResponseTemplate(code int) mi.OmiEnvelope {
 	return mi.OmiEnvelope{
 		Version: "1.0",
 		Ttl:     0,
 		Response: &mi.Response{
 			Results: []mi.RequestResult{
 				mi.RequestResult{
-					Return: &mi.Return{ReturnCode: code},
+					Return: &mi.Return{ReturnCode: strconv.Itoa(code)},
 				},
 			},
 		},
 	}
 }
 
-func createErrorResponse(code string, desc string) ([]byte, error) {
+func createErrorResponse(code int, desc string) ([]byte, error) {
 	envelope := createResponseTemplate(code)
 	ret := envelope.Response.Results[0].Return
 	ret.Description = desc
 	return mi.Marshal(envelope)
 }
 
-func createMessageResponse(code string, objects []byte) ([]byte, error) {
+func createMessageResponse(code int, objects []byte) ([]byte, error) {
 	envelope := createResponseTemplate(code)
 	envelope.Response.Results[0].Message = &mi.Message{Data: string(objects)}
 	return mi.Marshal(envelope)
 }
 
-func createResponse(code string) ([]byte, error) {
+func createResponse(code int) ([]byte, error) {
 	envelope := createResponseTemplate(code)
 	return mi.Marshal(envelope)
 }
 
-func createReqReply(code string, requestId string) ([]byte, error) {
+func createReqReply(code int, requestId string) ([]byte, error) {
 	envelope := createResponseTemplate(code)
 	envelope.Response.Results[0].RequestId = &mi.Id{Text: requestId}
 	return mi.Marshal(envelope)
@@ -183,6 +195,7 @@ func createMsg(objects []df.Object) ([]byte, error) {
 	return df.Marshal(df.Objects{Objects: objects})
 }
 
+// Clear the reply channel and forge a message to be sent back
 func clear(rc chan Reply) []df.Object {
 	objects := make([]df.Object, 0, 5)
 Clear:
@@ -236,6 +249,10 @@ func to_infoitems(datapoints []Data) []df.InfoItem {
 	return infoitems
 }
 
+/*
+ * Following methods are intended for querying possible datasources from a QLM node
+ */
+
 func NodeList(db Datastore) ([]byte, error) {
 	nodes := db.NodeList()
 	objects := make([]df.Object, 0, len(nodes))
@@ -245,7 +262,7 @@ func NodeList(db Datastore) ([]byte, error) {
 		objects = append(objects, object)
 	}
 	msg, _ := createMsg(objects)
-	return createMessageResponse("200", msg)
+	return createMessageResponse(http.StatusOK, msg)
 }
 
 func KeyList(node string, db Datastore) ([]byte, error) {
@@ -261,5 +278,5 @@ func KeyList(node string, db Datastore) ([]byte, error) {
 	objects := make([]df.Object, 0, 1)
 	objects = append(objects, object)
 	msg, _ := createMsg(objects)
-	return createMessageResponse("200", msg)
+	return createMessageResponse(http.StatusOK, msg)
 }

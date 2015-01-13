@@ -31,9 +31,11 @@ func main() {
 	flag.Parse()
 	r := mux.NewRouter()
 	s := r.PathPrefix("/qlm").Subrouter()
+	s.StrictSlash(true)
 	s.HandleFunc("/Objects/{node}/", qlmPoller)
 	s.HandleFunc("/Objects/", qlmPoller)
 	s.HandleFunc("/", qlmInterface)
+
 	r.HandleFunc("/qlmws", qlmHandler)
 	http.Handle("/", r)
 	fmt.Println("Waiting for connections on port 8000")

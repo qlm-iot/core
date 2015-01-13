@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -15,7 +16,6 @@ type Tracking struct {
 	requestId string
 	reply     chan Reply
 	subs      []Key
-	// What else? Needs to support both ways..
 }
 
 type Key struct {
@@ -23,12 +23,16 @@ type Key struct {
 }
 
 type InMemoryStore struct {
-	mu           sync.RWMutex
-	trackMu      sync.Mutex
+	mu        sync.RWMutex
+	datastore map[string]map[string]Data
+
+	trackMu  sync.Mutex
+	tracking map[string]*Tracking
+
 	subsMu       sync.RWMutex
-	datastore    map[string]map[string]Data
-	tracking     map[string]*Tracking
 	subscription map[Key][]*Tracking
+
+	nextId int64
 }
 
 // Methods required by the Datastore interface
@@ -41,7 +45,7 @@ func NewInMemoryStore() *InMemoryStore {
 }
 
 /*
-  Equals subscription request.. missing immediate read
+  Equals subscription request..
 */
 func (m *InMemoryStore) Subscribe(r *Request) (error, Reply) {
 	rId := m.requestId()
@@ -94,7 +98,10 @@ func (m *InMemoryStore) ReadImmediate(r *Request) (error, Reply) {
 }
 
 func (m *InMemoryStore) Write(w *Write) (error, Reply) {
-	datapoints := keymap(w.Datapoints)
+	datapoints := make(map[string]struct{})
+	for _, d := range w.Datapoints {
+		datapoints[d.Measurement] = struct{}{}
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -153,19 +160,9 @@ func (m *InMemoryStore) Cancel(requestId string) error {
 	return nil
 }
 
-func (m *InMemoryStore) read(node string, measurement string, reply chan string) {
-	/*
-		m.mu.RLock()
-		reply <- m.datastore[keyFormat(node, measurement)]
-		m.mu.RUnlock()
-	*/
-}
-
-var nextId int = 0
-
 func (m *InMemoryStore) requestId() string {
-	nextId++
-	return fmt.Sprintf("REQ%07d", nextId)
+	newId := atomic.AddInt64(&m.nextId, 1)
+	return fmt.Sprintf("REQ%07d", newId)
 }
 
 func (m *InMemoryStore) publish(key Key, value string, timestamp int64) error {
@@ -190,6 +187,8 @@ func keymap(dataslice []Data) map[string]struct{} {
 	}
 	return datapoints
 }
+
+// Functions to support querying what datasources are available
 
 func (m *InMemoryStore) NodeList() []string {
 	keystore := m.datastore
