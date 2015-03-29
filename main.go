@@ -9,6 +9,7 @@ import (
 )
 
 var destServer = flag.String("server", "", "Destination core server IP address")
+var port = flag.Int("port", 8000, "Server port to listen on")
 var db routing.Datastore
 
 func init() {
@@ -38,6 +39,7 @@ func main() {
 
 	r.HandleFunc("/qlmws", qlmHandler)
 	http.Handle("/", r)
-	fmt.Println("Waiting for connections on port 8000")
-	http.ListenAndServe("localhost:8000", nil) // ignore err for now..
+	addr := fmt.Sprintf("localhost:%d", *port)
+	fmt.Printf("Listening for connections at %s\n", addr)
+	http.ListenAndServe(addr, nil) // ignore err for now..
 }

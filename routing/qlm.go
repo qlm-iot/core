@@ -266,7 +266,7 @@ func NodeList(db Datastore) ([]byte, error) {
 }
 
 func KeyList(node string, db Datastore) ([]byte, error) {
-	keys, err := db.SourceList(node)
+	err, keys := db.SourceList(node)
 	if err != nil {
 		return nil, err
 	}
