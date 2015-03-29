@@ -199,14 +199,14 @@ func (m *InMemoryStore) NodeList() []string {
 	return keys
 }
 
-func (m *InMemoryStore) SourceList(node string) ([]string, error) {
+func (m *InMemoryStore) SourceList(node string) (error, []string) {
 	keystore, found := m.datastore[node]
 	if !found {
-		return nil, errors.New("Could not find node " + node)
+		return errors.New("Could not find node " + node), nil
 	}
 	keys := make([]string, 0, len(keystore))
 	for k := range keystore {
 		keys = append(keys, k)
 	}
-	return keys, nil
+	return nil, keys
 }
